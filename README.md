@@ -2,7 +2,7 @@
   <img src="logo.png" alt="pywilderlab Logo" width="300"/>
 </p>
 
-# pywilderlab
+# WilderGRAB
 
 A Python utility for downloading **eDNA results from the Wilderlab API** and saving them into an Excel workbook.  
 The script handles authentication, fetches jobs, samples, taxa, and records, and automatically splits large record tables across multiple Excel sheets if needed.
