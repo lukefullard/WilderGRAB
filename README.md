@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.png" alt="pywilderlab Logo" width="300"/>
+  <img src="logo.png" alt="wildergrab Logo" width="300"/>
 </p>
 
 # WilderGRAB
@@ -46,7 +46,7 @@ pip install pandas requests aws-requests-auth xlsxwriter
 
 ## Configuration
 
-At the top of **`pywilderlab.py`**, adjust settings:
+At the top of **`wildergrab.py`**, adjust settings:
 
 ```python
 save_location = 'eDNA_Data_September_2025.xlsx'  # output file
@@ -75,7 +75,7 @@ Alternatively, edit `api_credentials()` in the script with your keys.
 Run the script:
 
 ```bash
-python pywilderlab.py
+python wildergrab.py
 ```
 
 The script will:
