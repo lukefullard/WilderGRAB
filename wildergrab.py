@@ -11,6 +11,7 @@ import requests
 from aws_requests_auth.aws_auth import AWSRequestsAuth
 from io import StringIO
 import unicodedata
+import warnings
 
 
 ###############################################################################
@@ -116,7 +117,14 @@ def api_call(URL: str, access_key: str, secret_key: str, xapi_key: str,
         except Exception as e: 
             raise ValueError(f'ERROR: Issue storing data in dataframe: {e}')
     else:
-        print(response)
+        warnings.warn(f'''
+WARNING!
+Bad response code found when trying to access data from {URL}.
+{response}.
+
+This may cause the code to crash.
+Please check your API keys and ensure that the Wilderlab server is responsive.         
+                      ''')
         Data = None
 
     return Data, response_code
@@ -143,6 +151,8 @@ def get_api_data(query_table: str = "jobs") -> tuple[pd.DataFrame, int]:
     #Get API credentials
     try:   
         access_key,secret_key,xapi_key = api_credentials()
+        if (access_key == 'access_key_here') or (secret_key == 'secret_key_here') or (xapi_key   == 'xapi_key_here'):
+            raise ValueError('You need to modify all of access_key, secret_key, and xapi_key')
     except Exception as e: 
         raise ValueError(f'ERROR: Issue found trying to get api credentials: {e}')
     #form URL
@@ -171,7 +181,10 @@ def get_api_data_records(job_numbers: list[str], query_table: str = "records"
         """
 
     #Get API credentials
-    try:   access_key,secret_key,xapi_key = api_credentials()
+    try:   
+        access_key,secret_key,xapi_key = api_credentials()
+        if (access_key == 'access_key_here') or (secret_key == 'secret_key_here') or (xapi_key   == 'xapi_key_here'):
+            raise ValueError('You need to modify all of access_key, secret_key, and xapi_key')
     except Exception as e: 
         raise ValueError(f'ERROR: Issue found trying to get api credentials: {e}')
 
