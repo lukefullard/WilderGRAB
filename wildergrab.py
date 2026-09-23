@@ -5,24 +5,30 @@ Created on Thu May 19 08:40:34 2022
 @author: lfullard
 """
 
-#api stuff
-import pandas as pd
-import requests
-from aws_requests_auth.aws_auth import AWSRequestsAuth
+# api stuff
+import warnings
 from io import StringIO
 import unicodedata
-import warnings
+from aws_requests_auth.aws_auth import AWSRequestsAuth
+import pandas as pd
+import requests
 
 
 ###############################################################################
 ###############################################################################
 ###############################################################################
-#user settings
+# user settings
 save_location = 'eDNA_Data_September_2025.xlsx'
-include_jobs    = True
+include_jobs = True
 include_samples = True
-include_taxa    = True
+include_taxa = True
 include_records = True
+
+# Taxa retrieval mode:
+# Set True to download directly from the hosted CSV URL; set False to use the API call.
+use_taxa_web_url = True
+taxa_csv_url = 'https://s3.ap-southeast-2.amazonaws.com/wilderlab.examples/taxa.csv'
+
 
 def api_credentials() -> tuple[str, str, str]:
     """
@@ -42,21 +48,21 @@ def api_credentials() -> tuple[str, str, str]:
     """
     access_key = 'access_key_here'
     secret_key = 'secret_key_here'
-    xapi_key   = 'xapi_key_here'
-    
-    # #below are the test API keys from https://wilderlab.co/api-instructions
-    # access_key  =  "AKIATVYXGCYLWADFJVEX"
-    # secret_key  =  "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"
-    # xapi_key    =  "7CCm580l5vgeKbalwIEy565uFhbEudTauAq80B38"
-    return access_key,secret_key,xapi_key
+    xapi_key = 'xapi_key_here'
 
+    # # below are the test API keys from https://wilderlab.co/api-instructions
+    # access_key = "AKIATVYXGCYLWADFJVEX"
+    # secret_key = "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"
+    # xapi_key   = "7CCm580l5vgeKbalwIEy565uFhbEudTauAq80B38"
+    return access_key, secret_key, xapi_key
 
 
 ###############################################################################
 ###############################################################################
 ###############################################################################
-def api_call(URL: str, access_key: str, secret_key: str, xapi_key: str,
-                ) -> tuple[pd.DataFrame, int]:
+def api_call(
+    URL: str, access_key: str, secret_key: str, xapi_key: str
+) -> tuple[pd.DataFrame, int]:
     """
     Perform an authenticated GET to the Wilderlab API and return a DataFrame.
 
@@ -69,7 +75,6 @@ def api_call(URL: str, access_key: str, secret_key: str, xapi_key: str,
         access_key: AWS access key ID.
         secret_key: AWS secret access key.
         xapi_key: Wilderlab provided API key (X-API-Key).
-        timeout: Requests timeout in seconds (default 30).
 
     Returns:
         (DataFrame or None, HTTP status code)
@@ -77,146 +82,197 @@ def api_call(URL: str, access_key: str, secret_key: str, xapi_key: str,
     Raises:
         ValueError on problems building auth, sending request, or parsing CSV.
     """
-
-    #generate authentication
-    try: auth = AWSRequestsAuth(aws_access_key = access_key,
-                            aws_secret_access_key = secret_key,
-                            aws_host="connect.wilderlab.co.nz",
-                            aws_region='ap-southeast-2',
-                            aws_service='execute-api')
-    except Exception as e: 
+    # generate authentication
+    try:
+        auth = AWSRequestsAuth(
+            aws_access_key=access_key,
+            aws_secret_access_key=secret_key,
+            aws_host="connect.wilderlab.co.nz",
+            aws_region='ap-southeast-2',
+            aws_service='execute-api',
+        )
+    except Exception as e:
         raise ValueError(f'ERROR: Issue found trying to get AWS signature : {e}')
 
-    #form request
+    # form request
     req = requests.Request('GET', URL)
     req.body = b''
     req.method = ''
     req.prepare()
 
-    #form headers to send with request
-    try: 
-        headers = {"x-amz-date" : auth.get_aws_request_headers_handler(req)['x-amz-date'],
-                "Authorization" : auth.get_aws_request_headers_handler(req)['Authorization'],
-                "X-API-Key" : xapi_key}
-    except Exception as e: 
+    # form headers to send with request
+    try:
+        headers = {
+            "x-amz-date": auth.get_aws_request_headers_handler(req)['x-amz-date'],
+            "Authorization": auth.get_aws_request_headers_handler(req)['Authorization'],
+            "X-API-Key": xapi_key,
+        }
+    except Exception as e:
         raise ValueError(f'ERROR: Issue forming header: {e}')
 
-    response = requests.get(URL,auth=auth, headers=headers)
-    try: response = requests.get(URL,auth=auth, headers=headers)
-    except Exception as e: 
+    try:
+        response = requests.get(URL, auth=auth, headers=headers)
+    except Exception as e:
         raise ValueError(f'ERROR: Issue found sending request: {e}')
 
-    #check response code
+    # check response code
     response_code = response.status_code
 
     if response_code < 400:
-        #get data in dataframe
+        # get data in dataframe
         try:
-            Data = pd.read_csv(StringIO(response.json()['message']),encoding = 'utf-8')
+            Data = pd.read_csv(StringIO(response.json()['message']), encoding='utf-8')
             Data.fillna('', inplace=True)
-        except Exception as e: 
+        except Exception as e:
             raise ValueError(f'ERROR: Issue storing data in dataframe: {e}')
     else:
-        warnings.warn(f'''
+        warnings.warn(f"""
 WARNING!
 Bad response code found when trying to access data from {URL}.
 {response}.
 
 This may cause the code to crash.
 Please check your API keys and ensure that the Wilderlab server is responsive.         
-                      ''')
+                      """)
         Data = None
 
     return Data, response_code
 
 
-
 ###############################################################################
 ###############################################################################
 ###############################################################################
-###############################################################################
-
-
 def get_api_data(query_table: str = "jobs") -> tuple[pd.DataFrame, int]:
     """
-        Convenience function to fetch one top-level table (jobs, samples, taxa etc).
+    Convenience function to fetch one top-level table (jobs, samples, taxa etc).
 
-        Args:
-            query_table: The table name to request from the API (e.g., 'jobs', 'samples').
+    Args:
+        query_table: The table name to request from the API (e.g., 'jobs', 'samples').
 
-        Returns:
-            (DataFrame or None, HTTP status code)
+    Returns:
+        (DataFrame or None, HTTP status code)
     """
-
-    #Get API credentials
-    try:   
-        access_key,secret_key,xapi_key = api_credentials()
-        if (access_key == 'access_key_here') or (secret_key == 'secret_key_here') or (xapi_key   == 'xapi_key_here'):
-            raise ValueError('You need to modify all of access_key, secret_key, and xapi_key')
-    except Exception as e: 
+    # Get API credentials
+    try:
+        access_key, secret_key, xapi_key = api_credentials()
+        if (
+            (access_key == 'access_key_here')
+            or (secret_key == 'secret_key_here')
+            or (xapi_key == 'xapi_key_here')
+        ):
+            raise ValueError(
+                'You need to modify all of access_key, secret_key, and xapi_key'
+            )
+    except Exception as e:
         raise ValueError(f'ERROR: Issue found trying to get api credentials: {e}')
-    #form URL
+
+    # form URL
     URL = f'https://connect.wilderlab.co.nz/edna/?query={query_table}'
-    Data, response_code = api_call(URL, access_key,secret_key,xapi_key)
+    Data, response_code = api_call(URL, access_key, secret_key, xapi_key)
 
-    return Data,response_code
+    return Data, response_code
+
 
 ###############################################################################
 ###############################################################################
 ###############################################################################
-###############################################################################
-def get_api_data_records(job_numbers: list[str], query_table: str = "records"
-                             ) -> tuple[pd.DataFrame, int, list[str]]:
+def get_taxa_data(
+    use_web_url: bool = True, url: str = taxa_csv_url
+) -> tuple[pd.DataFrame, int]:
     """
-        Fetch 'records' CSV for each job id and concatenate into one DataFrame.
+    Fetch the taxa table either via direct CSV web download or through the Wilderlab API.
 
-        Args:
-            job_numbers: Iterable of job IDs (converted to str).
-            query_table: usually 'records' (kept parameter for flexibility).
+    Args:
+        use_web_url: If True, fetches taxa directly from the hosted CSV URL.
+                     If False, queries the Wilderlab API endpoint.
+        url: URL of the hosted taxa CSV.
 
-        Returns:
-            - concatenated DataFrame (may be empty if no data)
-            - largest HTTP response code observed across calls
-            - list of "job: {id}, response code: {code}||" strings for quick logging
-        """
+    Returns:
+        (DataFrame or None, HTTP status code)
+    """
+    if use_web_url:
+        print(f"Fetching taxa table from web address: {url}")
+        try:
+            response = requests.get(url, timeout=60)
+            response_code = response.status_code
 
-    #Get API credentials
-    try:   
-        access_key,secret_key,xapi_key = api_credentials()
-        if (access_key == 'access_key_here') or (secret_key == 'secret_key_here') or (xapi_key   == 'xapi_key_here'):
-            raise ValueError('You need to modify all of access_key, secret_key, and xapi_key')
-    except Exception as e: 
+            if response_code < 400:
+                taxa_data = pd.read_csv(StringIO(response.text), encoding='utf-8')
+                taxa_data.fillna('', inplace=True)
+            else:
+                warnings.warn(f"""
+WARNING!
+Bad response code ({response_code}) encountered while downloading taxa from {url}.
+                """)
+                taxa_data = None
+
+            return taxa_data, response_code
+        except Exception as e:
+            raise ValueError(
+                f"ERROR: Issue found downloading taxa CSV from web address: {e}"
+            )
+    else:
+        print("Fetching taxa table via Wilderlab API...")
+        return get_api_data(query_table='taxa')
+
+
+###############################################################################
+###############################################################################
+###############################################################################
+def get_api_data_records(
+    job_numbers: list[str], query_table: str = "records"
+) -> tuple[pd.DataFrame, int, list[str]]:
+    """
+    Fetch 'records' CSV for each job id and concatenate into one DataFrame.
+
+    Args:
+        job_numbers: Iterable of job IDs (converted to str).
+        query_table: usually 'records' (kept parameter for flexibility).
+
+    Returns:
+        - concatenated DataFrame (may be empty if no data)
+        - largest HTTP response code observed across calls
+        - list of "job: {id}, response code: {code}||" strings for quick logging
+    """
+    # Get API credentials
+    try:
+        access_key, secret_key, xapi_key = api_credentials()
+        if (
+            (access_key == 'access_key_here')
+            or (secret_key == 'secret_key_here')
+            or (xapi_key == 'xapi_key_here')
+        ):
+            raise ValueError(
+                'You need to modify all of access_key, secret_key, and xapi_key'
+            )
+    except Exception as e:
         raise ValueError(f'ERROR: Issue found trying to get api credentials: {e}')
 
-
-    #create empty pandas dataframe
     record_data = pd.DataFrame()
-    # print(Data)
     all_response_codes = []
     largest_response_code = 0
-    for job_i in job_numbers:
-        #form URL
 
+    for job_i in job_numbers:
         URL = f'https://connect.wilderlab.co.nz/edna/?query={query_table}&JobID={job_i}'
 
-        job_Data, response_code = api_call(URL, access_key,secret_key,xapi_key)
-        largest_response_code = max(largest_response_code,response_code)
-        #concat latest data
+        job_Data, response_code = api_call(URL, access_key, secret_key, xapi_key)
+        largest_response_code = max(largest_response_code, response_code)
         all_response_codes.append(f"job: {job_i}, response code: {response_code}||")
 
         print(f"Working on job: {job_i}, server response code: {response_code}")
 
-        record_data = job_Data if record_data.empty else pd.concat([record_data,job_Data])
+        record_data = (
+            job_Data if record_data.empty else pd.concat([record_data, job_Data])
+        )
+
+    # ensure no duplicate rows
+    record_data.drop_duplicates(inplace=True)
+    # reset index
+    record_data.reset_index(drop=True, inplace=True)
+
+    return record_data, largest_response_code, all_response_codes
 
 
-    #ensure no duplicate rows
-    record_data.drop_duplicates(inplace = True)
-    #reset index
-    record_data.reset_index(drop = True, inplace = True)
-
-    return record_data,largest_response_code,all_response_codes
-
-###############################################################################
 ###############################################################################
 ###############################################################################
 ###############################################################################
@@ -229,37 +285,45 @@ def get_all_records():
         None. Writes an Excel file or prints 'No outputs requested'.
     """
     EXCEL_MAX_ROWS = 1_048_576
-    
-    #get jobs information
+
+    # get jobs information
     if include_jobs:
-        jobs_data,jobs_response_code = get_api_data(query_table = 'jobs')
-    
-    #get samples information
-    if include_samples: 
-        samples_data,samples_response_code = get_api_data(query_table = 'samples')
-    
-    #get taxa information
+        jobs_data, jobs_response_code = get_api_data(query_table='jobs')
+
+    # get samples information
+    if include_samples:
+        samples_data, samples_response_code = get_api_data(query_table='samples')
+
+    # get taxa information
     if include_taxa:
-        taxa_data,taxa_response_code = get_api_data(query_table = 'taxa')
-    
-    #get all records for ALL jobs 
-    #CAUTION, this can take a while...
+        taxa_data, taxa_response_code = get_taxa_data(
+            use_web_url=use_taxa_web_url, url=taxa_csv_url
+        )
+
+    # get all records for ALL jobs
+    # CAUTION, this can take a while...
     if include_records:
         if not include_jobs:
-            jobs_data,jobs_response_code = get_api_data(query_table = 'jobs')
+            jobs_data, jobs_response_code = get_api_data(query_table='jobs')
         all_job_numbers = list(jobs_data['JobID'].unique())
-        records_data,records_largest_response_code,records_all_response_codes = get_api_data_records(job_numbers = all_job_numbers,query_table = 'records')
-    
-    if include_taxa+include_samples+include_taxa+include_records>=1:
+        (
+            records_data,
+            records_largest_response_code,
+            records_all_response_codes,
+        ) = get_api_data_records(
+            job_numbers=all_job_numbers, query_table='records'
+        )
+
+    if (include_jobs + include_samples + include_taxa + include_records) >= 1:
         with pd.ExcelWriter(save_location, engine="xlsxwriter") as writer:
             # --- Write other (small) dataframes ---
             if include_jobs:
-                jobs_data.to_excel(writer,    sheet_name="Jobs",    index=False)
-            if include_samples:     
+                jobs_data.to_excel(writer, sheet_name="Jobs", index=False)
+            if include_samples:
                 samples_data.to_excel(writer, sheet_name="Samples", index=False)
-            if include_taxa:    
-                taxa_data.to_excel(writer,    sheet_name="Taxa",    index=False)
-        
+            if include_taxa:
+                taxa_data.to_excel(writer, sheet_name="Taxa", index=False)
+
             # --- Write large dataframe, splitting if needed ---
             if include_records:
                 n_rows = len(records_data)
@@ -272,9 +336,9 @@ def get_all_records():
                         chunk = records_data.iloc[start:end]
                         sheet_name = f"records_part{i+1}"
                         chunk.to_excel(writer, sheet_name=sheet_name, index=False)
-    else: print('No outputs requested')                    
-    
+    else:
+        print('No outputs requested')
+
 
 if __name__ == '__main__':
     get_all_records()
-
